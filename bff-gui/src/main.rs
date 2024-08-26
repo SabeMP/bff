@@ -8,6 +8,8 @@ use artifact::Artifact;
 use bff::bigfile::BigFile;
 use bff::names::Name;
 #[cfg(not(target_arch = "wasm32"))]
+use clap::Parser;
+#[cfg(not(target_arch = "wasm32"))]
 use helpers::load::load_bf;
 
 pub mod artifact;
@@ -22,7 +24,44 @@ const TITLE: &str = "BFF Studio";
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(800.0, 600.0);
 
 #[cfg(not(target_arch = "wasm32"))]
-fn main() -> Result<(), eframe::Error> {
+#[derive(Debug, derive_more::From)]
+enum BffGuiError {
+    Io(std::io::Error),
+    EFrame(eframe::Error),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+type BffGuiResult<T> = Result<T, BffGuiError>;
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+#[clap(group = clap::ArgGroup::new("one").multiple(false))]
+struct Args {
+    #[clap(group = "one")]
+    file: Option<PathBuf>,
+    #[cfg(target_os = "windows")]
+    #[clap(long, group = "one")]
+    install: bool,
+    #[cfg(target_os = "windows")]
+    #[clap(long, group = "one")]
+    uninstall: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn main() -> BffGuiResult<()> {
+    let cli = Args::parse();
+    let file = cli.file.clone();
+
+    #[cfg(target_os = "windows")]
+    {
+        if cli.install {
+            return install();
+        } else if cli.uninstall {
+            return uninstall();
+        }
+    }
+
     let rt = tokio::runtime::Runtime::new().expect("Unable to create Runtime");
 
     let _enter = rt.enter();
@@ -43,7 +82,83 @@ fn main() -> Result<(), eframe::Error> {
         initial_window_size: Some(WINDOW_SIZE),
         ..Default::default()
     };
-    eframe::run_native(TITLE, options, Box::new(|cc| Box::new(Gui::new(cc))))
+    eframe::run_native(TITLE, options, Box::new(|cc| Box::new(Gui::new(cc, file))))?;
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+const PROG_ID: &str = "Widberg.BFF.1";
+
+#[cfg(target_os = "windows")]
+fn change_notify() {
+    use windows::Win32::UI::Shell::{SHChangeNotify, SHCNE_ASSOCCHANGED, SHCNF_IDLIST};
+
+    unsafe {
+        SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn install() -> BffGuiResult<()> {
+    use std::env::current_exe;
+
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+
+    let exe_path = current_exe()?.to_str().unwrap_or_default().to_owned();
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let classes = hkcu.open_subkey("Software\\Classes")?;
+
+    let (prog, _) = classes.create_subkey(PROG_ID)?;
+    prog.set_value("", &TITLE)?;
+    let (command, _) = prog.create_subkey("Shell\\Open\\Command")?;
+    command.set_value("", &format!(r#""{}" "%1""#, exe_path))?;
+
+    for extension in bff::bigfile::platforms::extensions() {
+        let (extension_key, _) =
+            classes.create_subkey(format!(".{}", extension.to_string_lossy()))?;
+        extension_key.set_value("", &PROG_ID)?;
+        let (open_with, _) = extension_key.create_subkey("OpenWithProgids")?;
+        open_with.set_value(PROG_ID, &"")?;
+    }
+
+    change_notify();
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn uninstall() -> BffGuiResult<()> {
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_ALL_ACCESS};
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let classes = hkcu.open_subkey("Software\\Classes")?;
+
+    let _ = classes.delete_subkey_all(PROG_ID);
+
+    for extension in bff::bigfile::platforms::extensions() {
+        if let Ok(default) = classes
+            .open_subkey_with_flags(format!(".{}", extension.to_string_lossy()), KEY_ALL_ACCESS)
+        {
+            if let Ok(prog_id) = default.get_value::<String, _>("") {
+                if prog_id == PROG_ID {
+                    default.delete_value("")?;
+                }
+            }
+
+            if let Ok(open_with) = default.open_subkey_with_flags("OpenWithProgids", KEY_ALL_ACCESS)
+            {
+                let _ = open_with.delete_value(PROG_ID);
+            }
+        }
+    }
+
+    change_notify();
+
+    Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -103,18 +218,33 @@ struct Gui {
 }
 
 impl Gui {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(
+        cc: &eframe::CreationContext<'_>,
+        #[cfg(not(target_arch = "wasm32"))] file: Option<PathBuf>,
+    ) -> Self {
         cc.egui_ctx.set_pixels_per_point(1.25);
         egui_extras::install_image_loaders(&cc.egui_ctx);
         setup_custom_font(&cc.egui_ctx);
         let (tx, rx) = std::sync::mpsc::channel();
+        #[cfg(not(target_arch = "wasm32"))]
+        let bf_loading = match file {
+            Some(path) => {
+                let p = PathBuf::from(path);
+                load_bf(cc.egui_ctx.clone(), p.clone(), tx.clone());
+                true
+            }
+            None => false,
+        };
+        #[cfg(target_arch = "wasm32")]
+        let bf_loading = false;
+
         Self {
             open_window: GuiWindow::default(),
             tx,
             rx,
             bigfile: None,
             bigfile_path: None,
-            bigfile_loading: false,
+            bigfile_loading: bf_loading,
             resource_name: None,
             nicknames: HashMap::new(),
             nickname_editing: (Name::default(), String::new()),
