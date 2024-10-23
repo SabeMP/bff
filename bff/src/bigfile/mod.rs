@@ -47,7 +47,7 @@ pub struct BigFile {
 }
 
 bigfiles! {
-    (Kalisto(1, 75) | BlackSheep(1, _), _) => BigFileV1_22PCNoVersionTripleBlackSheep,
+    (Kalisto(1, 75 | 73) | BlackSheep(1, _), _) => BigFileV1_22PCNoVersionTripleBlackSheep,
     (Kalisto(1, _), _) => BigFileV1_22PCNoVersionTriple,
     (BlackSheep(2, ..=7) | BlackSheep(2, 158..), _) => BigFileV2_07PCPROTO,
     (BlackSheep(2, _), _) => BigFileV2_07PCSHAUN,
@@ -58,6 +58,7 @@ bigfiles! {
     (Asobo(1, 0 | 2000..=2001, _, _), _) => BigFileV1_2000_77_18PC,
     (Asobo(1, 2002.., _, _), _) => BigFileV1_2002_45_19PC,
     (Asobo(2, 128, 92, _), _) => BigFileV2_128_92_19PC,
+    (Asobo(2, 256, 49, _), _) => BigFileV2_128_52_19PC,
     (Asobo(2, 256, _, _), _) => BigFileV2_256_38_19PC,
     (Asobo(2, 128, 52, _), _) => BigFileV2_128_52_19PC,
 }

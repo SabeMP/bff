@@ -396,9 +396,15 @@ impl Names {
         assert!(!had_errors, "Name decoding failed");
 
         for line in cow.lines() {
-            let (_, string) = line.split_once(' ').unwrap();
-            let string = string.trim_matches('"');
-            self.insert(string);
+            match line.split_once(' ') {
+                Some((_, mut string))	=> {
+                    string = string.trim_matches('"');
+                    self.insert(string);
+                }
+                None => {
+
+                }
+            }
         }
 
         Ok(())

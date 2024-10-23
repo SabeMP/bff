@@ -71,9 +71,16 @@ pub fn extract(
     std::fs::create_dir(&resources_path)?;
 
     for resource in bigfile.objects.values() {
-        let name = resource.name;
+        let mut name = format!("{}",resource.name);
+        name = name.split(">").last().unwrap().to_string();
+        name = name.split(".").next().unwrap().to_string();
         let class_name = resource.class_name;
-        let path = resources_path.join(format!("{}.{}", name, class_name));
+        let mut path = resources_path.join(format!("{}.{}", name, class_name));
+        let mut i = 0;
+        while path.exists() {
+            path.set_file_name(format!("{}_{}.{}", name, i, class_name));
+            i += 1;
+        }
         let mut writer = BufWriter::new(File::create(path)?);
         bigfile.dump_resource(resource, &mut writer)?;
     }
